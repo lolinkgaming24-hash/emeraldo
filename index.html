@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shortened Emerald Hack</title>
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; font-family: 'Courier New', monospace; overflow: hidden; display: flex; flex-direction: column; align-items: center; }
+        canvas { background: #4e9c64; border: 4px solid #fff; image-rendering: pixelated; width: 95vw; max-width: 500px; height: auto; margin-top: 10px; }
+        #ui-box { background: rgba(0,0,0,0.8); width: 95vw; max-width: 500px; padding: 10px; border: 2px solid #fff; margin-top: 5px; height: 100px; }
+        .controls { display: grid; grid-template-columns: repeat(3, 65px); gap: 8px; margin: 10px; }
+        button { width: 65px; height: 65px; background: #333; color: white; border: 2px solid #777; border-radius: 10px; font-weight: bold; touch-action: manipulation; }
+        .btn-atk { background: #a33; width: 100px; }
+    </style>
+</head>
+<body>
+    <div id="ui-box">
+        <div id="status">Explore to find Gym 1!</div>
+        <div id="battle-stats" style="display:none;">
+            Player: <span id="p-hp">100</span> | Boss: <span id="b-hp">100</span>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas" width="240" height="160"></canvas>
+    
+    <div class="controls" id="move-controls">
+        <div></div><button onclick="move(0,-8)">UP</button><div></div>
+        <button onclick="move(-8,0)">LEFT</button><button onclick="move(0,8)">DOWN</button><button onclick="move(8,0)">RIGHT</button>
+    </div>
+
+    <div id="battle-controls" style="display:none; margin-top:10px;">
+        <button class="btn-atk" onclick="playerAttack('Fire')">FIRE</button>
+        <button class="btn-atk" onclick="playerAttack('Water')">WATER</button>
+        <button class="btn-atk" onclick="playerAttack('Grass')">GRASS</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- POKEMON TYPE DATA ---
+        const TypeChart = {
+            Fire:  { Grass: 2, Water: 0.5, Rock: 0.5, Fire: 0.5 },
+            Water: { Fire: 2, Rock: 2, Grass: 0.5, Water: 0.5 },
+            Grass: { Water: 2, Rock: 2, Fire: 0.5, Grass: 0.5 },
+            Rock:  { Fire: 2, Grass: 0.5, Water: 0.5 }
+        };
+
+        // --- GAME PROGRESSION (4 GYMS + ELITE 2) ---
+        const bosses = [
+            { name: "Gym 1: Roxanne", type: "Rock", x: 110, y: 30, hp: 60, maxHp: 60, defeated: false },
+            { name: "Gym 2: Brawly", type: "Rock", x: 200, y: 70, hp: 90, maxHp: 90, defeated: false },
+            { name: "Gym 3: Wattson", type: "Fire", x: 110, y: 120, hp: 120, maxHp: 120, defeated: false },
+            { name: "Gym 4: Flannery", type: "Fire", x: 30, y: 70, hp: 150, maxHp: 150, defeated: false },
+            { name: "Elite 1: Drake", type: "Grass", x: 110, y: 70, hp: 200, maxHp: 200, defeated: false, hidden: true },
+            { name: "Elite 2: Steven", type: "Water", x: 210, y: 130, hp: 300, maxHp: 300, defeated: false, hidden: true }
+        ];
+
+        let player = { x: 20, y: 130, hp: 100, maxHp: 100 };
+        let state = "EXPLORE";
+        let currentBoss = null;
+        let badges = 0;
+
+        function move(dx, dy) {
+            if (state !== "EXPLORE") return;
+            player.x += dx; player.y += dy;
+            checkEncounter();
+        }
+
+        function checkEncounter() {
+            bosses.forEach((b, i) => {
+                if (!b.defeated && Math.abs(player.x - b.x) < 12 && Math.abs(player.y - b.y) < 12) {
+                    if (b.hidden && badges < 4) return; // Can't fight Elite 2 without 4 badges
+                    startBattle(b);
+                }
+            });
+        }
+
+        function startBattle(boss) {
+            state = "BATTLE";
+            currentBoss = boss;
+            document.getElementById('status').innerText = `Challenge ${boss.name}?`;
+            document.getElementById('battle-stats').style.display = 'block';
+            document.getElementById('move-controls').style.display = 'none';
+            document.getElementById('battle-controls').style.display = 'block';
+            updateUI();
+        }
+
+        function playerAttack(moveType) {
+            let multiplier = TypeChart[moveType][currentBoss.type] || 1;
+            let dmg = Math.floor(20 * multiplier);
+            currentBoss.hp -= dmg;
+            
+            let msg = multiplier > 1 ? "Super Effective!" : multiplier < 1 ? "Not very effective..." : "";
+            document.getElementById('status').innerText = `${msg} You dealt ${dmg} damage!`;
+            
+            if (currentBoss.hp <= 0) winBattle();
+            else setTimeout(bossAttack, 800);
+            updateUI();
+        }
+
+        function bossAttack() {
+            let dmg = 10 + (badges * 2);
+            player.hp -= dmg;
+            document.getElementById('status').innerText = `${currentBoss.name} attacks for ${dmg}!`;
+            if (player.hp <= 0) alert("You whited out!");
+            updateUI();
+        }
+
+        function winBattle() {
+            currentBoss.defeated = true;
+            badges++;
+            state = "EXPLORE";
+            player.hp = player.maxHp; // Heal after battle
+            document.getElementById('status').innerText = `You defeated ${currentBoss.name}!`;
+            document.getElementById('battle-controls').style.display = 'none';
+            document.getElementById('move-controls').style.display = 'grid';
+            if (badges === 4) {
+                bosses[4].hidden = false;
+                document.getElementById('status').innerText += " The Elite 2 has appeared!";
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('p-hp').innerText = player.hp;
+            document.getElementById('b-hp').innerText = currentBoss ? currentBoss.hp : 0;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, 240, 160);
+            // Draw Player
+            ctx.fillStyle = "blue"; ctx.fillRect(player.x, player.y, 12, 12);
+            // Draw Bosses
+            bosses.forEach(b => {
+                if (!b.defeated && !b.hidden) {
+                    ctx.fillStyle = b.name.includes("Elite") ? "gold" : "red";
+                    ctx.fillRect(b.x, b.y, 12, 12);
+                }
+            });
+            requestAnimationFrame(draw);
+        }
+        draw();
+    </script>
+</body>
+</html>
