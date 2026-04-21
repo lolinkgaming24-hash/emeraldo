@@ -14,3 +14,168 @@
     <script src="game.js"></script>
 </body>
 </html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stickman Brawler</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { box-shadow: 0 0 20px rgba(0,255,0,0.2); border: 2px solid #333; }
+    </style>
+</head>
+<body>
+<script>
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 450,
+    physics: {
+        default: 'arcade',
+        arcade: { gravity: { y: 1000 }, debug: false }
+    },
+    scene: { preload: preload, create: create, update: update }
+};
+
+const game = new Phaser.Game(config);
+
+let p1, p2, ground;
+let gameState = 'MENU';
+let mode = 1;
+let gameStarted = false;
+
+function preload() {}
+
+function create() {
+    this.cameras.main.setBackgroundColor('#1a1a1a');
+    showMenu.call(this);
+}
+
+function showMenu() {
+    this.add.text(400, 150, 'STICKMAN BRAWL', { fontSize: '48px', color: '#fff' }).setOrigin(0.5);
+    
+    let btn1 = this.add.text(400, 250, '[ 1 PLAYER vs CPU ]', { fontSize: '24px', color: '#0f0' }).setOrigin(0.5).setInteractive();
+    let btn2 = this.add.text(400, 310, '[ 2 PLAYERS LOCAL ]', { fontSize: '24px', color: '#0f0' }).setOrigin(0.5).setInteractive();
+
+    btn1.on('pointerdown', () => startCharSelect.call(this, 1));
+    btn2.on('pointerdown', () => startCharSelect.call(this, 2));
+}
+
+function startCharSelect(m) {
+    mode = m;
+    this.children.removeAll();
+    const classes = ['Swordman', 'Gunman', 'Bomber', 'Digger', 'Engineer'];
+    
+    this.add.text(400, 50, 'SELECT YOUR FIGHTER', { fontSize: '32px' }).setOrigin(0.5);
+
+    classes.forEach((name, i) => {
+        let btn = this.add.text(400, 120 + (i * 60), name, { fontSize: '28px', color: '#fff' })
+            .setOrigin(0.5).setInteractive();
+        
+        btn.on('pointerover', () => btn.setStyle({ color: '#f0f' }));
+        btn.on('pointerout', () => btn.setStyle({ color: '#fff' }));
+        btn.on('pointerdown', () => initGame.call(this, name));
+    });
+}
+
+function initGame(p1Class) {
+    this.children.removeAll();
+
+    // Physics Ground
+    ground = this.add.rectangle(400, 440, 800, 20, 0x555555);
+    this.physics.add.existing(ground, true);
+
+    // Players
+    p1 = createStickman(this, 150, 300, 0x00ff00, p1Class);
+    let p2Class = (mode === 1) ? 'Swordman' : p1Class;
+    p2 = createStickman(this, 650, 300, 0xff0000, p2Class);
+
+    this.physics.add.collider(p1, ground);
+    this.physics.add.collider(p2, ground);
+    
+    // UI
+    this.p1HP = this.add.text(20, 20, 'P1: 100', { fontSize: '20px', color: '#0f0' });
+    this.p2HP = this.add.text(780, 20, 'P2: 100', { fontSize: '20px', color: '#f00' }).setOrigin(1, 0);
+
+    // Controls
+    this.keys = this.input.keyboard.addKeys('W,A,S,D,SPACE,F,Q');
+    this.cursors = this.input.keyboard.createCursorKeys();
+
+    gameStarted = true;
+    gameState = 'PLAYING';
+}
+
+function createStickman(scene, x, y, color, type) {
+    let container = scene.add.container(x, y);
+    
+    // Draw Sprite
+    let body = scene.add.line(0, 0, 0, 0, 0, 30, color).setLineWidth(4);
+    let head = scene.add.circle(0, -10, 8, color);
+    let lArm = scene.add.line(0, 5, 0, 0, -15, 10, color).setLineWidth(3);
+    let rArm = scene.add.line(0, 5, 0, 0, 15, 10, color).setLineWidth(3);
+    
+    container.add([body, head, lArm, rArm]);
+    
+    // Physics
+    scene.physics.add.existing(container);
+    container.body.setSize(30, 50);
+    container.body.setCollideWorldBounds(true);
+    
+    container.hp = 100;
+    container.charType = type;
+    container.skillCooldown = false;
+
+    return container;
+}
+
+function update() {
+    if (!gameStarted) return;
+
+    // Player 1 Logic
+    if (this.keys.A.isDown) p1.body.setVelocityX(-200);
+    else if (this.keys.D.isDown) p1.body.setVelocityX(200);
+    else p1.body.setVelocityX(0);
+
+    if (this.keys.W.isDown && p1.body.touching.down) p1.body.setVelocityY(-500);
+
+    // Attack (Space)
+    if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
+        attack(p1, p2, 5);
+    }
+
+    // CPU Logic (Simple AI)
+    if (mode === 1) {
+        if (p2.x > p1.x + 60) p2.body.setVelocityX(-120);
+        else if (p2.x < p1.x - 60) p2.body.setVelocityX(120);
+        else {
+            p2.body.setVelocityX(0);
+            if (Math.random() > 0.98) attack(p2, p1, 5);
+        }
+    }
+
+    // Update UI
+    this.p1HP.setText('P1: ' + p1.hp);
+    this.p2HP.setText('P2: ' + p2.hp);
+
+    // Zooming Camera Logic
+    let dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+    let zoom = Phaser.Math.Clamp(1.5 - (dist / 800), 0.8, 1.2);
+    this.cameras.main.setZoom(zoom);
+    this.cameras.main.centerOn((p1.x + p2.x)/2, (p1.y + p2.y)/2);
+}
+
+function attack(attacker, target, damage) {
+    if (Phaser.Math.Distance.Between(attacker.x, attacker.y, target.x, target.y) < 60) {
+        target.hp -= damage;
+        // Simple hit flash
+        target.iterate(child => { if(child.setTint) child.setTint(0xffffff); });
+        setTimeout(() => {
+            target.iterate(child => { if(child.clearTint) child.clearTint(); });
+        }, 100);
+    }
+}
+</script>
+</body>
+</html>
