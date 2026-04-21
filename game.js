@@ -1,135 +1,208 @@
-// game.js
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-let state = "EXPLORE"; 
-let player = { x: 20, y: 80, hp: 100, maxHp: 100, badges: 0 };
-let activeBoss = null;
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 450,
+    parent: 'game-container',
+    physics: {
+        default: 'arcade',
+        arcade: { gravity: { y: 1000 }, debug: false }
+    },
+    scene: { preload: preload, create: create, update: update }
+};
 
-// --- INITIALIZATION & SAVE ---
-function init() {
-    const saved = localStorage.getItem('emerald_hack_save');
-    if (saved) {
-        const d = JSON.parse(saved);
-        player = { ...player, x: d.x, y: d.y, badges: d.badges };
-        d.defeatedList.forEach((def, i) => BOSSES[i].defeated = def);
-    }
-    render();
+const game = new Phaser.Game(config);
+
+let p1, p2, cursors, wasd, controls = {};
+let gameState = 'MENU';
+let mode = 1; // 1 = CPU, 2 = PvP
+let timerText, gameStarted = false;
+
+function preload() {
+    // Assets would be loaded here. Using Graphics for sprites below.
 }
 
-function save() {
-    const data = { 
-        x: player.x, y: player.y, badges: player.badges, 
-        defeatedList: BOSSES.map(b => b.defeated) 
-    };
-    localStorage.setItem('emerald_hack_save', JSON.stringify(data));
+function create() {
+    this.cameras.main.setBackgroundColor('#1a1a1a');
+    setupMenu.call(this);
 }
 
-// --- MOVEMENT & COLLISION ---
-function move(dx, dy) {
-    if (state !== "EXPLORE") return;
-    
-    // Boundary Checks (Keep player on screen)
-    let nextX = player.x + dx;
-    let nextY = player.y + dy;
-    if (nextX < 0 || nextX > 220 || nextY < 0 || nextY > 140) return;
+// --- CHARACTER DATA ---
+const CLASSES = {
+    Swordman: { color: 0x3498db, skillName: 'Slash', damage: 15, charge: 0 },
+    Gunman: { color: 0xe74c3c, skillName: 'Snipe', damage: 20, charge: 1500 },
+    Bomber: { color: 0xf1c40f, skillName: 'Explode', damage: 15, charge: 0 },
+    Digger: { color: 0x95a5a6, skillName: 'Dig', damage: 10, charge: 0 },
+    Engineer: { color: 0x9b59b6, skillName: 'Sentry', damage: 12, charge: 0 }
+};
 
-    player.x = nextX;
-    player.y = nextY;
+function setupMenu() {
+    let title = this.add.text(400, 150, 'STICKMAN BRAWLER', { fontSize: '64px', fountWeight: 'bold' }).setOrigin(0.5);
+    let btn1 = createButton(this, 400, 250, '1 PLAYER (vs CPU)', () => startCharSelect.call(this, 1));
+    let btn2 = createButton(this, 400, 320, '2 PLAYERS (Local)', () => startCharSelect.call(this, 2));
+}
 
-    // Check for Boss Encounters
-    BOSSES.forEach(boss => {
-        if (!boss.defeated) {
-            // If it's an Elite, only fight if 4 badges are held
-            if (boss.isElite && player.badges < 4) return;
-            
-            const dist = Math.sqrt((player.x - boss.x)**2 + (player.y - boss.y)**2);
-            if (dist < 15) startBattle(boss);
-        }
+function startCharSelect(m) {
+    mode = m;
+    this.children.removeAll();
+    this.add.text(400, 50, 'SELECT YOUR CHARACTER', { fontSize: '32px' }).setOrigin(0.5);
+
+    Object.keys(CLASSES).forEach((key, i) => {
+        let xPos = 150 + (i * 125);
+        let btn = createButton(this, xPos, 220, key, () => initMatch.call(this, key));
+        // Simple sprite preview
+        this.add.circle(xPos, 160, 20, CLASSES[key].color);
     });
 }
 
-// --- BATTLE SYSTEM ---
-function startBattle(boss) {
-    state = "BATTLE";
-    activeBoss = boss;
-    document.getElementById('explore-ui').style.display = 'none';
-    document.getElementById('battle-ui').style.display = 'block';
-    document.getElementById('msg').innerText = `Leader challenges you!`;
-    updateBars();
-}
-
-function handleAttack(moveIndex) {
-    if (state !== "BATTLE") return;
-    const move = PLAYER_MOVES[moveIndex];
+function initMatch(p1Selection) {
+    this.children.removeAll();
     
-    // Damage Calculation
-    let multiplier = (TYPE_CHART[move.type] && TYPE_CHART[move.type][activeBoss.type]) || 1;
-    let damage = Math.floor(move.power * multiplier * 0.6);
-    activeBoss.hp -= damage;
+    // Create Ground
+    let ground = this.add.rectangle(400, 440, 2000, 40, 0x333333);
+    this.physics.add.existing(ground, true);
 
-    document.getElementById('msg').innerText = `${move.name}! ${multiplier > 1 ? "It's super effective!" : ""}`;
-    updateBars();
+    // Initialize Players
+    p1 = createPlayer(this, 200, 300, p1Selection, false);
+    let p2Class = mode === 1 ? Object.keys(CLASSES)[Math.floor(Math.random()*5)] : p1Selection; 
+    p2 = createPlayer(this, 600, 300, p2Class, mode === 1);
 
-    if (activeBoss.hp <= 0) {
-        setTimeout(victory, 1000);
-    } else {
-        state = "WAITING"; // Prevent spam
-        setTimeout(bossTurn, 1000);
-    }
-}
+    this.physics.add.collider(p1, ground);
+    this.physics.add.collider(p2, ground);
 
-function bossTurn() {
-    let dmg = 10 + (player.badges * 4);
-    player.hp -= dmg;
-    document.getElementById('msg').innerText = `${activeBoss.name} attacks back!`;
-    updateBars();
+    // UI & Controls
+    setupUI.call(this);
+    setupMobileControls.call(this);
     
-    if (player.hp <= 0) {
-        alert("You whited out!");
-        location.reload();
-    } else {
-        state = "BATTLE";
-    }
-}
-
-function victory() {
-    activeBoss.defeated = true;
-    player.badges++;
-    player.hp = player.maxHp;
-    state = "EXPLORE";
-    save();
-    alert(`Received the Badge! Total: ${player.badges}/4`);
-    document.getElementById('battle-ui').style.display = 'none';
-    document.getElementById('explore-ui').style.display = 'grid';
-    document.getElementById('msg').innerText = "Keep exploring!";
-}
-
-// --- UI & RENDERING ---
-function updateBars() {
-    document.getElementById('p-hp-bar').style.width = (player.hp / player.maxHp * 100) + "%";
-    document.getElementById('b-hp-bar').style.width = (activeBoss.hp / activeBoss.maxHp * 100) + "%";
-}
-
-function render() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw Grass/Floor
-    ctx.fillStyle = "#5db971";
-    ctx.fillRect(0,0, 240, 160);
-
-    // Draw Player
-    ctx.fillStyle = "blue";
-    ctx.fillRect(player.x, player.y, 16, 16);
-
-    // Draw Bosses
-    BOSSES.forEach(b => {
-        if (!b.defeated) {
-            if (b.isElite && player.badges < 4) return; // Hide Elite 2
-            ctx.fillStyle = b.isElite ? "gold" : "red";
-            ctx.fillRect(b.x, b.y, 16, 16);
+    // 3 Second Countdown
+    let count = 3;
+    let cdText = this.add.text(400, 200, '3', { fontSize: '80px' }).setOrigin(0.5);
+    let timer = setInterval(() => {
+        count--;
+        cdText.setText(count);
+        if(count <= 0) {
+            cdText.destroy();
+            gameStarted = true;
+            clearInterval(timer);
         }
-    });
-    requestAnimationFrame(render);
+    }, 1000);
 }
 
-init();
+function createPlayer(scene, x, y, type, isCPU) {
+    let container = scene.add.container(x, y);
+    let bodyCircle = scene.add.circle(0, 0, 20, CLASSES[type].color);
+    let head = scene.add.circle(0, -25, 12, CLASSES[type].color);
+    container.add([bodyCircle, head]);
+    
+    scene.physics.world.enable(container);
+    container.body.setCollideWorldBounds(true).setBounce(0.1);
+    
+    container.hp = 100;
+    container.charType = type;
+    container.isCPU = isCPU;
+    container.isBlocking = false;
+    container.skillReady = true;
+    container.lastDir = 1; // 1 for right, -1 for left
+
+    return container;
+}
+
+function update(time, delta) {
+    if (!gameStarted) return;
+
+    handleInput(p1, 'WASD');
+    if (p2.isCPU) handleAI(p2, p1, time);
+    else handleInput(p2, 'ARROWS');
+
+    // Health Bar Updates
+    this.p1Bar.width = p1.hp * 2;
+    this.p2Bar.width = p2.hp * 2;
+
+    // Dynamic Camera Zoom
+    let dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+    let zoomTarget = Phaser.Math.Clamp(1.2 - (dist / 1000), 0.6, 1.1);
+    this.cameras.main.setZoom(Phaser.Math.Linear(this.cameras.main.zoom, zoomTarget, 0.05));
+    this.cameras.main.centerOn((p1.x + p2.x)/2, (p1.y + p2.y)/2 - 50);
+}
+
+// --- COMBAT LOGIC ---
+function useSkill(user, target, scene) {
+    if (!user.skillReady || user.isBlocking) return;
+    user.skillReady = false;
+
+    if (user.charType === 'Swordman') {
+        // Dash Attack
+        scene.tweens.add({
+            targets: user,
+            x: user.x + (user.lastDir * 100),
+            duration: 200,
+            onComplete: () => checkHit(user, target, 15, 60)
+        });
+    } else if (user.charType === 'Bomber') {
+        // Self-damage and AOE
+        user.hp -= 5;
+        let boom = scene.add.circle(user.x, user.y, 80, 0xffa500, 0.5);
+        if(Phaser.Math.Distance.Between(user.x, user.y, target.x, target.y) < 80) {
+            applyDamage(target, 15);
+            target.body.setVelocityY(-200); // Stun/Knockback
+        }
+        setTimeout(() => boom.destroy(), 200);
+    } else if (user.charType === 'Digger') {
+        // Invulnerability
+        user.alpha = 0.3;
+        user.isInvulnerable = true;
+        setTimeout(() => { user.alpha = 1; user.isInvulnerable = false; }, 3000);
+    }
+
+    // Cooldown logic
+    setTimeout(() => { user.skillReady = true; }, 10000);
+}
+
+function applyDamage(target, amt) {
+    if (target.isBlocking) amt *= 0.2;
+    if (target.isInvulnerable) amt = 0;
+    target.hp = Math.max(0, target.hp - amt);
+}
+
+// --- AI LOGIC ---
+function handleAI(cpu, player, time) {
+    let dist = Math.abs(cpu.x - player.x);
+    
+    // Move toward player
+    if (dist > 60) {
+        cpu.body.setVelocityX(player.x > cpu.x ? 120 : -120);
+    } else {
+        cpu.body.setVelocityX(0);
+        // Attack if close
+        if (Math.random() > 0.95) checkHit(cpu, player, 5, 40);
+    }
+
+    // Use skill if ready
+    if (cpu.skillReady && dist < 100) useSkill(cpu, player, cpu.scene);
+}
+
+// Helper: Hit Detection
+function checkHit(attacker, target, damage, range) {
+    if (Phaser.Math.Distance.Between(attacker.x, attacker.y, target.x, target.y) < range) {
+        applyDamage(target, damage);
+    }
+}
+
+// Helper: Button Creator
+function createButton(scene, x, y, text, callback) {
+    let b = scene.add.text(x, y, text, { backgroundColor: '#444', padding: 10 })
+        .setOrigin(0.5).setInteractive()
+        .on('pointerdown', callback);
+    return b;
+}
+
+function setupUI() {
+    this.add.text(20, 20, 'P1');
+    this.p1Bar = this.add.rectangle(45, 25, 200, 20, 0x00ff00).setOrigin(0, 0.5);
+    this.add.text(780, 20, 'P2').setOrigin(1,0);
+    this.p2Bar = this.add.rectangle(755, 25, 200, 20, 0xff0000).setOrigin(1, 0.5);
+}
+
+function setupMobileControls() {
+    // Add logic here to draw circles on bottom left/right 
+    // and bind them to player.body.setVelocity
+}
